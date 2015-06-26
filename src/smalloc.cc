@@ -21,6 +21,7 @@
 
 #include "smalloc.h"
 
+#include "node_block_alloc.h"
 #include "env.h"
 #include "env-inl.h"
 #include "node.h"
@@ -53,6 +54,93 @@ using v8::Value;
 using v8::WeakCallbackData;
 using v8::kExternalUint8Array;
 
+template<size_t datasize>
+struct dataholder {
+    size_t dsize;
+    char blob[datasize];
+};
+
+static BlockAllocator<dataholder<32> > b32(100);
+static BlockAllocator<dataholder<64> > b64(100);
+static BlockAllocator<dataholder<96> > b96(100);
+static BlockAllocator<dataholder<128> > b128(100);
+static BlockAllocator<dataholder<160> > b160(100);
+static BlockAllocator<dataholder<192> > b192(100);
+static BlockAllocator<dataholder<224> > b224(100);
+
+//it's really fast but looooooool hacks
+inline char *getptr(size_t insize) {
+    size_t ind = (insize / 32);
+
+    static void *jmps[] = {&&bl32, &&bl64, &&bl96, &&bl128, &&bl160, &&bl192, &&bl224};
+    size_t *myval;
+    if (ind < 7)
+        goto *jmps[ind];
+
+    myval = (size_t *)malloc(insize + sizeof(size_t));
+    *myval = ind;
+    return (char *)(myval + 1);
+
+bl32:
+    myval = (size_t *)b32.alloc()->blob;
+    goto procval;
+bl64:
+    myval = (size_t *)b64.alloc()->blob;
+    goto procval;
+bl96:
+    myval = (size_t *)b96.alloc()->blob;
+    goto procval;
+bl128:
+    myval = (size_t *)b128.alloc()->blob;
+    goto procval;
+bl160:
+    myval = (size_t *)b160.alloc()->blob;
+    goto procval;
+bl192:
+    myval = (size_t *)b192.alloc()->blob;
+    goto procval;
+bl224:
+    myval = (size_t *)b224.alloc()->blob;
+
+procval:
+    *myval = ind;
+    return (char *)(myval + 1);
+}
+
+inline void freeptr(void *inptr) {
+
+    inptr = (size_t *)inptr - 1;
+    size_t ind = *(size_t *)inptr;
+
+    static void *jmps[] = {&&bl32, &&bl64, &&bl96, &&bl128, &&bl160, &&bl192, &&bl224};
+    if (ind < 7)
+        goto *jmps[ind];
+    return;
+
+bl32:
+    b32.free(inptr);
+    return;
+bl64:
+    b64.free(inptr);
+    return;
+bl96:
+    b96.free(inptr);
+    return;
+bl128:
+    b128.free(inptr);
+    return;
+bl160:
+    b160.free(inptr);
+    return;
+bl192:
+    b192.free(inptr);
+    return;
+bl224:
+    b224.free(inptr);
+}
+
+
+
 
 class CallbackInfo {
  public:
@@ -79,7 +167,7 @@ class CallbackInfo {
 
 
 void CallbackInfo::Free(char* data, void*) {
-  ::free(data);
+  freeptr(data);
 }
 
 
@@ -329,7 +417,7 @@ void Alloc(Environment* env,
   if (length == 0)
     return Alloc(env, obj, NULL, length, type);
 
-  char* data = static_cast<char*>(malloc(length));
+  char* data = static_cast<char*>(getptr(length));
   if (data == NULL) {
     FatalError("node::smalloc::Alloc(v8::Handle<v8::Object>, size_t,"
                " v8::ExternalArrayType)", "Out Of Memory");

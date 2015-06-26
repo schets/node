@@ -280,4 +280,8 @@ public:
 
 } //namespace node
 
+#undef likely
+#undef unlikely
+#undef noinline
+
 #endif //SRC_NODE_STACK_ALLOC_H
