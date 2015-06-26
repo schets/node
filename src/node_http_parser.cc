@@ -159,11 +159,11 @@ struct StringPtr {
 
 
   void Update(const char* str, size_t size) {
-    if (str_ == NULL) {
+    if (str_ == NULL && (fakestart.next == NULL)) {
       str_ = (char *)str;
       sizecur += size;
     }
-    else if (on_heap_ || str_ + size != str) {
+    else {
       //add new extra chunk of text
       stringchunk *nextchunk = new stringchunk(str, size);
       strhead->next = nextchunk;
@@ -203,8 +203,8 @@ struct StringPtr {
         strhead = strhead->next;
         delete del;
       }
-      strhead = &fakestart;
     }
+    strhead = &fakestart;
   }
 
   char* str_;
