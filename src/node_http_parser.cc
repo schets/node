@@ -165,10 +165,17 @@ struct StringPtr {
       sizecur += size;
     }
     else if ((str_ + size_ != str) || (fakestart.next != NULL)){
-      //add new extra chunk of text
-      stringchunk *nextchunk = new stringchunk(str, size);
-      strhead->next = nextchunk;
-      strhead = nextchunk;
+
+      //can we append to the current chunk
+      if(strhead->chunk + strhead->size != str) {
+        //add new extra chunk of text
+        stringchunk *nextchunk = new stringchunk(str, size);
+        strhead->next = nextchunk;
+        strhead = nextchunk;
+      }
+      else {
+        strhead->size += size;
+      }
     }
     size_ += size;
   }
