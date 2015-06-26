@@ -110,6 +110,7 @@ struct StringPtr {
 
   StringPtr() {
     on_heap_ = false;
+    strhead = NULL;
     Reset();
   }
 
@@ -194,8 +195,9 @@ struct StringPtr {
         strhead = strhead->next;
         delete del;
       }
-      strhead = NULL;
     }
+    strhead = NULL;
+    
   }
 
   char* str_;
