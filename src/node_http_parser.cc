@@ -641,7 +641,6 @@ void InitHttpParser(Handle<Object> target,
                     Handle<Value> unused,
                     Handle<Context> context,
                     void* priv) {
-    fprintf(stderr, "Calling Http Initializer\n\n\n****\n\n");
   Environment* env = Environment::GetCurrent(context);
   Local<FunctionTemplate> t = FunctionTemplate::New(env->isolate(),
                                                     Parser::New);
