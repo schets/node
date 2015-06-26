@@ -70,7 +70,6 @@ class SlabManager {
         slab<T> *retslab = reinterpret_cast<slab<T> *>(data);
         retslab->data = reinterpret_cast<T *>(retslab + 1);
         retslab->next = retslab->prev = NULL;
-        retslab->slabsize = slabsize;
         return retslab;
     }
 
@@ -82,7 +81,7 @@ protected:
     
     inline slab<T> *get_slab() {
         if(unlikely(!head)) {
-            return alloc_slab(slabsize);
+            return alloc_slab();
         }
         else {
             slab<T> *rethead = head;
@@ -93,7 +92,7 @@ protected:
     }
 
     inline void return_slab(slab<T> *retslab) {
-        if(likely(retslab)) {
+        if(likely(retslab != NULL)) {
             retslab->next = head;
             head=retslab;
         }
@@ -133,10 +132,10 @@ private:
 template<class T>
 class ManagedStackAllocator {
 
-    slab<T> *stackhead;
-    slab<T> *curpos;
-    slab<T> *slabend;
+    T *curpos;
+    T *slabend;
     SlabManager<T>& manager;
+    slab<T> *stackhead;
     slab<T> *start;
     
 private:
@@ -164,6 +163,8 @@ private:
             start++;
         }
     }
+    
+public:
 
     ManagedStackAllocator(SlabManager<T>& man)
         :
@@ -174,8 +175,6 @@ private:
         slabend = curpos + manager.slabsize;
     }
     
-public:
-
     T *alloc() {
         if (unlikely(curpos == slabend)) {
             return inc_slab();
@@ -186,7 +185,10 @@ public:
     void pop() {
         if (unlikely(curpos == stackhead->data)) {
             if(likely(stackhead != start)) {
+                slab<T> *oldhead = stackhead;
                 stackhead = stackhead->prev;
+                stackhead->next = NULL;
+                manager.return_slab(oldhead);
                 curpos = stackhead->data;
                 slabend = curpos + manager.slabsize;
             }
@@ -223,12 +225,6 @@ public:
             while (curdel < stackhead) {
                 slab<T> *del = curdel;
                 dtor_slab(del->data, del->data + slabsize);
-                curdel = curdel->next;
-                manager.return_slab(del);
-            }
-            curdel = stackhead->next;
-            while (curdel) {
-                slab<T> *del = curdel;
                 curdel = curdel->next;
                 manager.return_slab(del);
             }

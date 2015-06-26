@@ -22,6 +22,7 @@
 #include "node.h"
 #include "node_buffer.h"
 #include "node_http_parser.h"
+#include "node_stack_alloc.h"
 
 #include "base-object.h"
 #include "base-object-inl.h"
@@ -31,6 +32,7 @@
 #include "util-inl.h"
 #include "v8.h"
 
+#include <stdio.h>
 #include <stdlib.h>  // free()
 #include <string.h>  // strdup()
 
@@ -90,27 +92,31 @@ const uint32_t kOnMessageComplete = 3;
   }                                                                           \
   int name##_(const char* at, size_t length)
 
-
+struct stringchunk {
+  const char *chunk;
+  size_t size;
+  stringchunk *next;
+  stringchunk(const char *c, size_t s)
+    :
+    chunk(c),
+    size(s),
+    next(NULL) {};
+};
+    
+//globaly manages various slabs
+const static size_t chunks_per_slab = 50;
+static SlabManager<stringchunk> all_slabs(chunks_per_slab);
 
 // helper class for the Parser
 struct StringPtr {
 
   //!instead of reallocing/copying 1e6 times,
   //!store list of from chunks!
-  struct stringchunk {
-    const char *chunk;
-    size_t size;
-    stringchunk *next;
-      stringchunk(const char *c, size_t s)
-        :
-        chunk(c),
-        size(s),
-        next(NULL) {};
-  };
-
+  
   StringPtr()
     :
-    fakestart(0, 0){
+    fakestart(0, 0),
+    alloc(all_slabs){
     on_heap_ = false;
     strhead = &fakestart;
     fakestart.chunk = 0;
@@ -148,12 +154,7 @@ struct StringPtr {
     str_ = NULL;
     size_ = 0;
     sizecur = 0;
-    strhead = fakestart.next;
-    while(strhead) {
-        stringchunk *del = strhead;
-        strhead = strhead->next;
-        delete del;
-    }
+    alloc.release_mem();
     strhead = &fakestart;
     fakestart.next = NULL;
   }
@@ -169,7 +170,10 @@ struct StringPtr {
       //can we append to the current chunk
       if(strhead->chunk + strhead->size != str) {
         //add new extra chunk of text
-        stringchunk *nextchunk = new stringchunk(str, size);
+        stringchunk *nextchunk = alloc.alloc();
+        nextchunk->next = NULL;
+        nextchunk->chunk = str;
+        nextchunk->size = size;
         strhead->next = nextchunk;
         strhead = nextchunk;
       }
@@ -208,10 +212,9 @@ struct StringPtr {
       while(strhead) {
         memcpy(copyfrom, strhead->chunk, strhead->size);
         copyfrom += strhead->size;
-        stringchunk *del = strhead;
         strhead = strhead->next;
-        delete del;
       }
+      alloc.release_mem();
       strhead = &fakestart;
       fakestart.next = NULL;
     }
@@ -220,6 +223,7 @@ struct StringPtr {
   char* str_;
   stringchunk fakestart;
   stringchunk *strhead;
+  ManagedStackAllocator<stringchunk> alloc;
   bool on_heap_;
   size_t size_;
   size_t sizecur;
@@ -637,6 +641,7 @@ void InitHttpParser(Handle<Object> target,
                     Handle<Value> unused,
                     Handle<Context> context,
                     void* priv) {
+    fprintf(stderr, "Calling Http Initializer\n\n\n****\n\n");
   Environment* env = Environment::GetCurrent(context);
   Local<FunctionTemplate> t = FunctionTemplate::New(env->isolate(),
                                                     Parser::New);
