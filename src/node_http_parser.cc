@@ -155,6 +155,7 @@ struct StringPtr {
         delete del;
     }
     strhead = &fakestart;
+    fakestart.next = NULL;
   }
 
 
@@ -181,6 +182,7 @@ struct StringPtr {
       return String::Empty(env->isolate());
   }
 
+
   void UpdateChunks() {
     if (fakestart.next) {
       strhead = fakestart.next;
@@ -203,16 +205,17 @@ struct StringPtr {
         strhead = strhead->next;
         delete del;
       }
+      strhead = &fakestart;
+      fakestart.next = NULL;
     }
-    strhead = &fakestart;
   }
 
   char* str_;
+  stringchunk fakestart;
   stringchunk *strhead;
   bool on_heap_;
   size_t size_;
   size_t sizecur;
-  stringchunk fakestart;
 };
 
 
