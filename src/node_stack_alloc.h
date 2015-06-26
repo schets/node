@@ -28,8 +28,8 @@
 //in benchmarks have seen a ~10-15% allocation speed gain
 //anyways though these will help to preserve icache
 #if (defined __GNUC__ || defined __clang__)
-#define likely(x) __builtin_expect((x), 1)
-#define unlikely(x) __builtin_expect((x), 0)
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
 #define noinline __attribute__ ((noinline))
 #else
 #define likely(x) x
@@ -56,15 +56,23 @@ template<class T> class ManagedStackAllocator;
 //Slabmanager is seperate from StackAllocator
 
 //Of course, a plain StackAllocator is provided as well!
+
+/**
+ * This class manages the allocation, deallocation, and ownership of
+ * memory blocks used by the stack allocators
+ */
 template<class T>
 class SlabManager {
 
     //this is rarely called, so not inlining reduces icache pressure
     //In addition, both GCC and clang add a lot of extra push/pop
     //instructions when this gets inlined
+    /**
+     * Creates a new slab pointer along with the datablob
+     */ 
     slab<T> * noinline alloc_slab() {
         void *data = malloc(slabsize * sizeof(T) + sizeof(slab<T>));
-        if (data == NULL) {
+        if (unlikely(data == NULL)) {
             return NULL;
         }
         slab<T> *retslab = reinterpret_cast<slab<T> *>(data);
@@ -79,6 +87,9 @@ class SlabManager {
 
 protected:
     
+    /**
+     * Returns a new slab to an allocator
+     */ 
     inline slab<T> *get_slab() {
         if(unlikely(!head)) {
             return alloc_slab();
@@ -91,6 +102,10 @@ protected:
         }
     }
 
+    /**
+     * Places a new slab at the head of the slab list.
+     * Slab is placed first since it is more likely to be in the cache
+     */ 
     inline void return_slab(slab<T> *retslab) {
         if(likely(retslab != NULL)) {
             retslab->next = head;
@@ -106,6 +121,9 @@ public:
         slabsize = slabsize_ > 0 ? slabsize_ : 1;
     }
     
+    /**
+     * Frees slabs until the manager only holds n_keep slabs
+     */
     void trim_to(size_t n_keep = 0) {
         slab<T> *start = head;
         size_t curnum = 0;
@@ -124,39 +142,61 @@ public:
     }
 
 private: 
+    
+    //!Holds a pointer to the head of the slab list
     slab<T> *head;
+
+    //!The number of elements held in each slab
     size_t slabsize;
+
     friend class ManagedStackAllocator<T>;
 };
 
+/**
+ * This class allocates memory by popping and pushing elements
+ * from a stack. The stack consists of a linked list of slabs
+ * form which values are allocated. This class does not manage
+ * ownership of slabs and instead delegates that funcitonality to an
+ * external SlabManager
+ */
 template<class T>
 class ManagedStackAllocator {
 
+    //!A pointer to the current value at the top of the stack
     T *curpos;
+
+    //Pointer to the end of the current slab
     T *slabend;
+
+    //!Object to control slabs in use
     SlabManager<T>& manager;
+
+    //!Current top of the stack (in terms of allocations)
     slab<T> *stackhead;
+
+    //!Pointer to start of stack
     slab<T> *start;
     
 private:
+    /**
+     * Adds a new slab to the end of the list
+     */
     T * noinline inc_slab() {
-        if (stackhead->next) {
-            stackhead = stackhead->next;
+        slab<T> *next = manager.get_slab();
+        if (unlikely(next == NULL)) {
+            return NULL;
         }
-        else {
-            slab<T> *next = manager.get_slab();
-            if (unlikely(next == NULL)) {
-                return NULL;
-            }
-            next->prev = stackhead;
-            stackhead->next = next;
-            stackhead = next;
-        }
+        next->prev = stackhead;
+        stackhead->next = next;
+        stackhead = next;
         curpos = stackhead->data;
         slabend = curpos + manager.slabsize;
         return curpos++;
     }
 
+    /**
+     * Calls the destructor on every element between [start, end)
+     */
     void dtor_slab(T *start, T* end) {
         while(start < end) {
             start->~T();
@@ -175,6 +215,7 @@ public:
         slabend = curpos + manager.slabsize;
     }
     
+    //!Returns a pointer from the top of the stack
     T *alloc() {
         if (unlikely(curpos == slabend)) {
             return inc_slab();
@@ -182,6 +223,7 @@ public:
         return curpos++;
     }
 
+    //!Removes a pointer from the top of the stack
     void pop() {
         if (unlikely(curpos == stackhead->data)) {
             if(likely(stackhead != start)) {
@@ -189,8 +231,8 @@ public:
                 stackhead = stackhead->prev;
                 stackhead->next = NULL;
                 manager.return_slab(oldhead);
-                curpos = stackhead->data;
-                slabend = curpos + manager.slabsize;
+                slabend = stackhead->data + manager.slabsize;
+                curpos = slabend-1;
             }
         }
         else {
