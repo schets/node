@@ -101,16 +101,21 @@ struct StringPtr {
     const char *chunk;
     size_t size;
     stringchunk *next;
-      stringchunk(const char *c, size_t s, stringchunk *n)
+      stringchunk(const char *c, size_t s)
         :
         chunk(c),
         size(s),
-        next(n) {};
+        next(NULL) {};
   };
 
-  StringPtr() {
+  StringPtr()
+    :
+    fakestart(0, 0){
     on_heap_ = false;
-    strhead = NULL;
+    strhead = &fakestart;
+    fakestart.chunk = 0;
+    fakestart.size = 0;
+    fakestart.next = 0;
     Reset();
   }
 
@@ -143,12 +148,13 @@ struct StringPtr {
     str_ = NULL;
     size_ = 0;
     sizecur = 0;
+    strhead = fakestart.next;
     while(strhead) {
         stringchunk *del = strhead;
         strhead = strhead->next;
         delete del;
     }
-    strhead = NULL;
+    strhead = &fakestart;
   }
 
 
@@ -159,7 +165,8 @@ struct StringPtr {
     }
     else if (on_heap_ || str_ + size != str) {
       //add new extra chunk of text
-      stringchunk *nextchunk = new stringchunk(str, size, strhead);
+      stringchunk *nextchunk = new stringchunk(str, size);
+      strhead->next = nextchunk;
       strhead = nextchunk;
     }
     size_ += size;
@@ -175,7 +182,8 @@ struct StringPtr {
   }
 
   void UpdateChunks() {
-    if (strhead) {
+    if (fakestart.next) {
+      strhead = fakestart.next;
       if (on_heap_) {
         str_ = static_cast<char *>(realloc(str_, size_ * sizeof(*str_)));
       }
@@ -195,9 +203,8 @@ struct StringPtr {
         strhead = strhead->next;
         delete del;
       }
+      strhead = &fakestart;
     }
-    strhead = NULL;
-    
   }
 
   char* str_;
@@ -205,6 +212,7 @@ struct StringPtr {
   bool on_heap_;
   size_t size_;
   size_t sizecur;
+  stringchunk fakestart;
 };
 
 
