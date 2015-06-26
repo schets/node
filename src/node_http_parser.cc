@@ -109,7 +109,7 @@ struct StringPtr {
   // to leak references. See issue #2438 and test-http-parser-bad-ref.js.
   void Save() {
     if (!on_heap_ && size_ > 0) {
-      char* s = new char[size_];
+      char* s = (char *)malloc(sizeof(char)*size_);
       memcpy(s, str_, size_);
       str_ = s;
       on_heap_ = true;
@@ -119,7 +119,7 @@ struct StringPtr {
 
   void Reset() {
     if (on_heap_) {
-      delete[] str_;
+        free(str_);
       on_heap_ = false;
     }
 
@@ -130,20 +130,19 @@ struct StringPtr {
 
   void Update(const char* str, size_t size) {
     if (str_ == NULL)
-      str_ = str;
-    else if (on_heap_ || str_ + size_ != str) {
+      str_ = (char *)str;
+    else if (on_heap_) {
       // Non-consecutive input, make a copy on the heap.
       // TODO(bnoordhuis) Use slab allocation, O(n) allocs is bad.
-      char* s = new char[size_ + size];
-      memcpy(s, str_, size_);
-      memcpy(s + size_, str, size);
-
-      if (on_heap_)
-        delete[] str_;
-      else
+      str_ = (char *)realloc(str_, sizeof(char) * (size_ + size));
+      memcpy(str_ + size_, str, size);
+    }
+    else if (str_ + size != str) {
+        char *s = (char *)malloc(sizeof(char) * (size + size_));
+        memcpy(s, str_, sizeof(char) * size_);
+        memcpy(s + size_, str, sizeof(char)*size);
+        str_ = s;
         on_heap_ = true;
-
-      str_ = s;
     }
     size_ += size;
   }
@@ -157,7 +156,7 @@ struct StringPtr {
   }
 
 
-  const char* str_;
+  char* str_;
   bool on_heap_;
   size_t size_;
 };
