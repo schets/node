@@ -160,11 +160,11 @@ struct StringPtr {
 
 
   void Update(const char* str, size_t size) {
-    if (str_ == NULL && (fakestart.next == NULL)) {
+    if (str_ == NULL) {
       str_ = (char *)str;
       sizecur += size;
     }
-    else {
+    else if ((str_ + size_ != str) || (fakestart.next != NULL)){
       //add new extra chunk of text
       stringchunk *nextchunk = new stringchunk(str, size);
       strhead->next = nextchunk;
