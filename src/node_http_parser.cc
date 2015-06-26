@@ -91,8 +91,23 @@ const uint32_t kOnMessageComplete = 3;
   int name##_(const char* at, size_t length)
 
 
+
 // helper class for the Parser
 struct StringPtr {
+
+  //!instead of reallocing/copying 1e6 times,
+  //!store list of from chunks!
+  struct stringchunk {
+    const char *chunk;
+    size_t size;
+    stringchunk *next;
+      stringchunk(const char *c, size_t s, stringchunk *n)
+        :
+        chunk(c),
+        size(s),
+        next(n) {};
+  };
+
   StringPtr() {
     on_heap_ = false;
     Reset();
@@ -108,6 +123,7 @@ struct StringPtr {
   // so. This is called at the end of each http_parser_execute() so as not
   // to leak references. See issue #2438 and test-http-parser-bad-ref.js.
   void Save() {
+    UpdateChunks();
     if (!on_heap_ && size_ > 0) {
       char* s = (char *)malloc(sizeof(char)*size_);
       memcpy(s, str_, size_);
@@ -119,46 +135,74 @@ struct StringPtr {
 
   void Reset() {
     if (on_heap_) {
-        free(str_);
+      free(str_);
       on_heap_ = false;
     }
 
     str_ = NULL;
     size_ = 0;
+    sizecur = 0;
+    while(strhead) {
+        stringchunk *del = strhead;
+        strhead = strhead->next;
+        delete del;
+    }
+    strhead = NULL;
   }
 
 
   void Update(const char* str, size_t size) {
-    if (str_ == NULL)
+    if (str_ == NULL) {
       str_ = (char *)str;
-    else if (on_heap_) {
-      // Non-consecutive input, make a copy on the heap.
-      // TODO(bnoordhuis) Use slab allocation, O(n) allocs is bad.
-      str_ = (char *)realloc(str_, sizeof(char) * (size_ + size));
-      memcpy(str_ + size_, str, size);
+      sizecur += size;
     }
-    else if (str_ + size != str) {
-        char *s = (char *)malloc(sizeof(char) * (size + size_));
-        memcpy(s, str_, sizeof(char) * size_);
-        memcpy(s + size_, str, sizeof(char)*size);
-        str_ = s;
-        on_heap_ = true;
+    else if (on_heap_ || str_ + size != str) {
+      //add new extra chunk of text
+      stringchunk *nextchunk = new stringchunk(str, size, strhead);
+      strhead = nextchunk;
     }
     size_ += size;
   }
 
 
-  Local<String> ToString(Environment* env) const {
+  Local<String> ToString(Environment* env) {
+    UpdateChunks();
     if (str_)
       return OneByteString(env->isolate(), str_, size_);
     else
       return String::Empty(env->isolate());
   }
 
+  void UpdateChunks() {
+    if (strhead) {
+      if (on_heap_) {
+        str_ = static_cast<char *>(realloc(str_, size_ * sizeof(*str_)));
+      }
+      else {
+        char *s = static_cast<char *>(malloc(size_ * sizeof(*str_)));
+        memcpy(s, str_, sizecur);
+        str_ = s;
+      }
+      on_heap_ = true;
+      
+      char *copyfrom = str_ + sizecur;
+      sizecur = size_;
+      while(strhead) {
+        memcpy(copyfrom, strhead->chunk, strhead->size);
+        copyfrom += strhead->size;
+        stringchunk *del = strhead;
+        strhead = strhead->next;
+        delete del;
+      }
+      strhead = NULL;
+    }
+  }
 
   char* str_;
+  stringchunk *strhead;
   bool on_heap_;
   size_t size_;
+  size_t sizecur;
 };
 
 
