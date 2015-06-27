@@ -64,19 +64,31 @@ template<class T> class ManagedStackAllocator;
 template<class T>
 class SlabManager {
 
+    const static size_t cache_bound = 64;
     //this is rarely called, so not inlining reduces icache pressure
     //In addition, both GCC and clang add a lot of extra push/pop
     //instructions when this gets inlined
     /**
      * Creates a new slab pointer along with the datablob
+     * such that the data pointer starts on a 64 byte boundary
      */ 
     slab<T> * noinline alloc_slab() {
-        void *data = malloc(slabsize * sizeof(T) + sizeof(slab<T>));
+        void *data = malloc(slabsize * sizeof(T) + sizeof(*head) + cache_bound);
         if (unlikely(data == NULL)) {
             return NULL;
         }
         slab<T> *retslab = reinterpret_cast<slab<T> *>(data);
-        retslab->data = reinterpret_cast<T *>(retslab + 1);
+        //treat the address as number for easier arithmetic
+
+        size_t slab_end = reinterpret_cast<size_t>(retslab + 1);
+        if(!(slab_end % cache_bound))
+            retslab->data = reinterpret_cast<T *>(retslab + 1);
+        else if (slab_end < cache_bound) //suuuuper unlikely but possible?
+            retslab->data = reinterpret_cast<T *>(cache_bound);
+        else {
+            size_t incr = slab_end + (cache_bound - (slab_end % cache_bound));
+            retslab->data = reinterpret_cast<T *>(incr);
+        }
         retslab->next = retslab->prev = NULL;
         return retslab;
     }

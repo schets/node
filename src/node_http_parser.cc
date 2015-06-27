@@ -120,10 +120,6 @@ struct StringPtr {
     fakestart(0, 0),
     alloc(all_slabs){
     on_heap_ = false;
-    strhead = &fakestart;
-    fakestart.chunk = 0;
-    fakestart.size = 0;
-    fakestart.next = 0;
     Reset();
   }
 
@@ -169,18 +165,20 @@ struct StringPtr {
     }
     else if ((str_ + size_ != str) || (fakestart.next != NULL)){
       if (size_ < minsize) {
-        if (!on_heap) {
-          char *s = malloc(size_ + size);
-          on_heap = true;
+        if (!on_heap_) {
+          char *s = static_cast<char *>(malloc(size_ + size));
+          on_heap_ = true;
           memcpy(s, str_, size_);
+          str_ = s;
         }
         else {
-          str_ = realloc(str_, size_ + size);
+          str_ = static_cast<char *>(realloc(str_, size_ + size));
         }
         memcpy(str_ + size_, str, size);
+        sizecur += size;
       }
       //can we append to the current chunk
-      if(strhead->chunk + strhead->size != str) {
+      else if(strhead->chunk + strhead->size != str) {
         //add new extra chunk of text
         stringchunk *nextchunk = alloc.alloc();
         nextchunk->next = NULL;
@@ -216,8 +214,8 @@ struct StringPtr {
         char *s = static_cast<char *>(malloc(size_ * sizeof(*str_)));
         memcpy(s, str_, sizecur);
         str_ = s;
+        on_heap_ = true;
       }
-      on_heap_ = true;
       
       char *copyfrom = str_ + sizecur;
       sizecur = size_;
