@@ -92,6 +92,8 @@ const uint32_t kOnMessageComplete = 3;
   }                                                                           \
   int name##_(const char* at, size_t length)
 
+#define minsize 64
+    
 struct stringchunk {
   const char *chunk;
   size_t size;
@@ -110,7 +112,7 @@ static SlabManager<stringchunk> all_slabs(chunks_per_slab);
 // helper class for the Parser
 struct StringPtr {
 
-  //!instead of reallocing/copying 1e6 times,
+  //!instead of reallocing/copying 1e4 times,
   //!store list of from chunks!
   
   StringPtr()
@@ -166,7 +168,17 @@ struct StringPtr {
       sizecur += size;
     }
     else if ((str_ + size_ != str) || (fakestart.next != NULL)){
-
+      if (size_ < minsize) {
+        if (!on_heap) {
+          char *s = malloc(size_ + size);
+          on_heap = true;
+          memcpy(s, str_, size_);
+        }
+        else {
+          str_ = realloc(str_, size_ + size);
+        }
+        memcpy(str_ + size_, str, size);
+      }
       //can we append to the current chunk
       if(strhead->chunk + strhead->size != str) {
         //add new extra chunk of text
