@@ -195,17 +195,30 @@ private:
      */
     T * noinline inc_slab() {
         slab<T> *next = manager.get_slab();
-        if (unlikely(next == NULL)) {
+        if (unlikely(next == NULL))
             return NULL;
-        }
+
         next->prev = stackhead;
-        stackhead->next = next;
+        if(stackhead) 
+            stackhead->next = next;
+
         stackhead = next;
         curpos = stackhead->data;
         slabend = curpos + manager.slabsize;
         return curpos++;
     }
 
+    //!Returns a slab to the manager
+    void noinline dec_slab() {
+        if(likely(stackhead != start)) {
+            slab<T> *oldhead = stackhead;
+            stackhead = stackhead->prev;
+            stackhead->next = NULL;
+            manager.return_slab(oldhead);
+            slabend = stackhead->data + manager.slabsize;
+            curpos = slabend-1;
+        }
+    }
     /**
      * Calls the destructor on every element between [start, end)
      */
@@ -220,73 +233,63 @@ public:
 
     ManagedStackAllocator(SlabManager<T>& man)
         :
-        manager(man) {
-        start = man.get_slab();
-        stackhead = start;
-        curpos = stackhead->data;
-        slabend = curpos + manager.slabsize;
+        curpos(NULL),
+        slabend(NULL),
+        manager(man),
+        stackhead(NULL),
+        start(NULL)
+         {}
+
+    ~ManagedStackAllocator() {
+        release_mem();
     }
     
     //!Returns a pointer from the top of the stack
     T *alloc() {
-        if (unlikely(curpos == slabend)) {
+        if (unlikely(curpos == slabend)) 
             return inc_slab();
-        }
         return curpos++;
     }
 
-    //!Removes a pointer from the top of the stack
+    //!Removes a pointer from the top of the stack, returns slab if
+    //!not first
     void pop() {
-        if (unlikely(curpos == stackhead->data)) {
-            if(likely(stackhead != start)) {
-                slab<T> *oldhead = stackhead;
-                stackhead = stackhead->prev;
-                stackhead->next = NULL;
-                manager.return_slab(oldhead);
-                slabend = stackhead->data + manager.slabsize;
-                curpos = slabend-1;
-            }
-        }
-        else {
+        if (unlikely(curpos == stackhead->data)) 
+            dec_slab();
+        else 
             --curpos;
-        }
     }
 
-    //!Releases all but first block
+    //!Releases all blocks, calls all destructors
     void release_mem() {
-        slab<T> *curdel = start->next;
-        while (curdel) {
-            slab<T> *del = curdel;
-            curdel = curdel->next;
+        while (start) {
+            slab<T> *del = start;
+            start = start->next;
             manager.return_slab(del);
         }
-        stackhead = start;
-        start->next = NULL;
-        curpos = start->data;
-        slabend = curpos + manager.slabsize;
+        curpos = NULL;
+        slabend = NULL;
+        start = NULL;
+        stackhead = NULL;
     }
 
-    //releases all but first block, calls all destructors
+    //!Releases all blocks, calls all destructors
     void delete_mem() {
-        dtor_slab(stackhead->data, curpos);
-        if (stackhead == start) {
-            release_mem();
+
+        size_t slabsize = manager.slabsize;
+        while (start != stackhead) {
+            slab<T> *del = start;
+            dtor_slab(del->data, del->data + slabsize);
+            start = start->next;
+            manager.return_slab(del);
         }
-        else {
-            size_t slabsize = manager.slabsize;
-            dtor_slab(start->data, start->data + slabsize);
-            slab<T> *curdel = start->next;
-            while (curdel < stackhead) {
-                slab<T> *del = curdel;
-                dtor_slab(del->data, del->data + slabsize);
-                curdel = curdel->next;
-                manager.return_slab(del);
-            }
-        }
-        stackhead = start;
-        start->next = NULL;
-        curpos = start->data;
-        slabend = curpos + manager.slabsize;
+        if (stackhead)
+            dtor_slab(stackhead->data, curpos);
+
+        curpos = NULL;
+        slabend = NULL;
+        start = NULL;
+        stackhead = NULL;
     }
 };
 
